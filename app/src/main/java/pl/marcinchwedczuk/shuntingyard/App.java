@@ -4,11 +4,22 @@
 package pl.marcinchwedczuk.shuntingyard;
 
 public class App {
-    public String getGreeting() {
-        return "Hello World!";
-    }
-
     public static void main(String[] args) {
-        System.out.println(new App().getGreeting());
+        var gen = new RandomASTGenerator();
+
+        for (int i = 0; i < 16_000; i++) {
+            Ast t = gen.generateTree();
+
+            var rpn = ShuntingYardAlgorithm.toRPN(t.toReadableExpr(0));
+            var expected = t.toRPN();
+            if (!rpn.equals(expected)) {
+                System.out.printf("EXPR: %s%n", t.toReadableExpr(0));
+                System.out.printf("RPN : %s%n", t.toRPN());
+
+                System.out.printf("SHYA: %s%n", rpn);
+                System.out.println("---------------------------------------------");
+                break;
+            }
+        }
     }
 }
