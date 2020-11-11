@@ -1,5 +1,6 @@
 package pl.marcinchwedczuk.shuntingyard;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Streams;
 
 import java.util.*;
@@ -7,17 +8,60 @@ import java.util.regex.Pattern;
 
 import static java.util.stream.Collectors.toList;
 
-public class ShuntingYardAlgo {
-    public static String toRPN(String input) {
+/**
+ * RPN does not support unary operators out of the box.
+ * Consider this example:
+ *      2 + (-5)
+ * How should we write it in RPN:
+ *      2 5 - +
+ * can represent both
+ *      2 + (-5)
+ *      +(2 - 5)
+ * The result will be the same but the AST and used operators
+ * will not be unique.
+ *
+ * To solve this problem we need to introduce a new operators
+ * unary+ (un+) and unary- (un-) and change our tokenizer to
+ * produce these new operators.
+ *
+ * un+ and un- can only occur:
+ * - at the beginning of the expression e.g. -5
+ * - right after left parentheses e.g. (-5)
+ * - after some other operator e.g. 3 * -5
+ * - after , in a function call e.g. pow(2, -5)
+ *
+ */
+public class ShuntingYardAlgorithm {
+    @VisibleForTesting
+    public static List<String> tokenize(String input) {
         var tokenizer = new StringTokenizer(input, "+-*/^(),", true);
+
         var tokens = Streams.stream(tokenizer.asIterator())
                 .map(String.class::cast)
                 .map(String::trim)
                 .filter(token -> !token.isEmpty())
                 .collect(toList());
 
-        var algo = new ShuntingYardAlgo(new ArrayDeque<>(tokens));
-        return algo.toRPN();
+        var transformedTokens = new ArrayList<String>(tokens.size());
+
+        boolean allowUnary = true;
+        for (var token: tokens) {
+            if (allowUnary && ("-".equals(token) || "+".equals(token))) {
+                token = "un" + token;
+            }
+            else {
+                allowUnary = "(".equals(token) || ",".equals(token) || isOperator(token);
+            }
+            transformedTokens.add(token);
+        }
+
+        return transformedTokens;
+    }
+
+    public static String toRPN(String input) {
+        var tokens = tokenize(input);
+        var algorithm = new ShuntingYardAlgorithm(new ArrayDeque<>(tokens));
+        return algorithm.toRPN();
     }
 
     private final static Pattern numberRegex = Pattern.compile("^\\d+$");
@@ -27,7 +71,7 @@ public class ShuntingYardAlgo {
     private final Queue<String> outputQueue = new ArrayDeque<>();
     private final Queue<String> inputQueue;
 
-    public ShuntingYardAlgo(Queue<String> inputQueue) {
+    public ShuntingYardAlgorithm(Queue<String> inputQueue) {
         this.inputQueue = inputQueue;
     }
 
@@ -91,9 +135,10 @@ public class ShuntingYardAlgo {
         return identifierRegex.asMatchPredicate().test(s);
     }
 
-    private boolean isOperator(String s) {
+    private static boolean isOperator(String s) {
         return switch (s) {
             case "+","-","*","/","^" -> true;
+            case "un-","un+" -> true;
             default -> false;
         };
     }
@@ -109,6 +154,10 @@ public class ShuntingYardAlgo {
             case "(", ")" -> 0;
             case "+","-" -> 5;
             case "*","/" -> 10;
+            // Be careful with negation and raising to power:
+            // -2^2 == -(2^2)
+            // -2^-2^-2 = -(2^-(2^-2))
+            case "un+","un-" -> 15;
             case "^" -> 20;
             default -> throw new IllegalArgumentException("not an operator: '" + operator + "'");
         };
@@ -117,6 +166,10 @@ public class ShuntingYardAlgo {
     private String associativity(String operator) {
         return switch (operator) {
             case "+","-","*","/" -> "left";
+            // We use "right" for unary operators. From math POV it really doesn't matter, but
+            // we need to use "right" to prevent pop'ing them from the stack when next unary operator
+            // is coming.
+            case "un+", "un-" -> "right";
             case "^" -> "right";
             default -> throw new IllegalArgumentException("not an operator: '" + operator + "'");
         };
